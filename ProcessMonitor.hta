@@ -1,0 +1,611 @@
+<!----------------------------------------------------------------------------
+  - (C) 2012-2015 MS Roth                                                         
+  - msroth.wordpress.com                                                     
+  -																		 
+  - This HTA file provides a simple framework to monitor processes running on
+  - Windows hosts.  The list of processes and host should be added to the    
+  - arrProcessList array below.  In addition, the monitor's title and        
+  - instructions can be modified.
+  -
+  - Licensed under the Apache License, Version 2.0 (the "License");
+  - you may not use this file except in compliance with the License.
+  - You may obtain a copy of the License at
+  -
+  -   http://www.apache.org/licenses/LICENSE-2.0
+  -
+  - Unless required by applicable law or agreed to in writing, software
+  - distributed under the License is distributed on an "AS IS" BASIS,
+  - WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  - See the License for the specific language governing permissions and
+  - limitations under the License.
+  -
+  - v1.6 - added check to ensure username and password validate before
+  -        trying to connect to remote servers.  This check prevents account
+  -        lock out on a fat-fingered password.
+  - v1.5 - updated copyright year
+  -      - added 'Refresh Now' button
+  -      - updated instructions
+  - v1.4 - changed name to ProcessMonitor
+  -      - added version number
+  -      - added IDSx process definition
+  - v1.3 - added ADTS and xPlore process definitions
+  - v1.2 - added complete set of IA process definitions
+  - v1.1 - changed (flattened) structure of arrHostsWithProcesses
+  - v1.0 - initial release
+  -
+  -
+  - See the <script> tag below for instructions for configuring servers and
+  - processes.
+  -
+  ---------------------------------------------------------------------------->
+  
+<html>
+<head>
+	<title>ProcessMonitor HTA v1.6 (c) 2012 - 2015 MS Roth -- msroth.wordpress.com</title>
+	<HTA:APPLICATION
+	  APPLICATIONNAME="ProcessMonitor v1.6"
+	  ID="ProcessMonitor v1.6"
+	  VERSION="1.0"
+	  SINGLEINSTANCE="yes"/>
+  
+	<style type="text/css">
+	
+	body { font-family: Arial, Helvetica, sans-serif; }
+	
+	#processes table, #processes tr, #processes td, #processes th {
+	    border:1px solid black;
+		border-collapse:collapse;
+		padding:3px 7px 2px 7px;
+	}
+	
+	blinktext {
+	    text-decoration: blink;
+	}
+	
+	#processes td.running {
+		background-color:00CC00; 
+		color:black;
+		text-align:center;
+	}
+	
+	#processes td.stopped {
+		background-color:#CC0000; 
+		color:black;
+		text-align:center;
+	}
+	
+	#processes td.error {
+		background-color:black; 
+		color:white;
+	}	
+	
+	#processes th {
+		background-color:#B0B0B0;
+		color:black;
+		text-align:center;
+	}
+	</style>
+</head>
+
+<script language="VBScript">
+
+	' Global Vars
+	iRefreshTimerID = -1
+	iWorkingTimerID = -1
+	strUser = ""
+	strPassword = ""
+	iRefreshInterval = 0
+	strLastRefresh = ""
+	Set oWbemLocator = Nothing
+
+	' structure to hold hosts and processes - final map structure
+ 	Set arrHostsWithProcesses = Nothing
+
+	'--------------------------------------------------------------------------
+	'- Include all processes to be monitored in the arrProcessList Array List.
+	'- The format is: 
+	'- 
+	'-   <host>:<process name>
+	'-
+	'- host = the DNS name or IP address of the server running the process
+	'- process name = the name of the process.  This can be obtained by
+	'-                viewing the properties of the Windows service.
+	'--------------------------------------------------------------------------
+	Set arrProcessList = CreateObject("System.Collections.ArrayList")
+	
+'   TEST SERVERS	
+	arrProcessList.add("127.0.0.1:DmDocbroker")
+	arrProcessList.add("127.0.0.1:DmServerrepo1")
+	arrProcessList.add("127.0.0.1:Tomcat6")
+	arrProcessList.add("127.0.0.1:MSSQLSERVER")
+	arrProcessList.add("127.0.0.1:InputAccel")
+	arrProcessList.add("127.0.0.1:IAMULTI")
+	
+'--------------------------------------------------------------------------
+'   GENERIC PROCESS LIST 
+'	Format:  <host>:<process name>
+'
+' 	InputAccel
+'	------------------------------------------
+'	arrProcessList.add("<host>:InputAccel")		' InputAccel Server
+'	arrProcessList.add("<host>:IISADMIN")		' InputAccel Admin Console
+'	arrProcessList.add("<host>:CODE")		' InputAccel .Net Code Module
+'	arrProcessList.add("<host>:SCRPTENG")		' InputAccel Client Script Engine
+'	arrProcessList.add("<host>:ABYOCR2")		' InputAccel East Euro/APAC OCR
+'	arrProcessList.add("<host>:EMAILIMP")		' InputAccel Email Import
+'	arrProcessList.add("<host>:IAEXDM")		' InputAccel Documentum Export
+'	arrProcessList.add("<host>:IAIMAGE")		' InputAccel Image Utility
+'	arrProcessList.add("<host>:IMGCONV")		' InputAccel Image Converter
+'	arrProcessList.add("<host>:IMGDIVID")		' InputAccel Image Divider
+'	arrProcessList.add("<host>:IAIPI")		' InputAccel Image Enhancement
+'	arrProcessList.add("<host>:IAEXIMG")		' InputAccel Image Export
+'	arrProcessList.add("<host>:IAEXIDX")		' InputAccel Index Export
+'	arrProcessList.add("<host>:IAMULTI")		' InputAccel Multi
+'	arrProcessList.add("<host>:IAMDW")		' InputAccel Multi-Directory Watch
+'	arrProcessList.add("<host>:SSOCR"		' InputAccel NuanceOCR
+'	arrProcessList.add("<host>:IAXODBC2")		' InputAccel ODBC Export
+'	arrProcessList.add("<host>:IATIMER")		' InputAccel Timer
+'	arrProcessList.add("<host>:VAL2XML")		' InputAccel Values to XML
+'	arrProcessList.add("<host>:WSCoordinator")	' InputAccel Web Services Coordinator
+'	arrProcessList.add("<host>:WSHosting")		' InputAccel Web Services Hosting
+'	arrProcessList.add("<host>:WSInput")		' InputAccel Web Services Input
+'	arrProcessList.add("<host>:WSOutput")		' InputAccel Web Services Output
+'
+' 	Documentum
+'	------------------------------------------
+'	arrProcessList.add("<host>:DmDocbroker")		' Docbroker
+'	arrProcessList.add("<host>:DmServer<repo name>")	' Repository
+'	arrProcessList.add("<host>:DmMethodServer")		' Java Method Server
+'	arrProcessList.add("<host>:Tomcat6")			' Documentum Admin			
+'
+'	SQL Server
+'	------------------------------------------
+'	arrProcessList.add("<host>:MSSQLSERVER")		' SQL Server
+'
+'	Oracle
+'	------------------------------------------
+'	arrProcessList.add("<host>:ORCL")			' Oracle
+'
+'	ADTS
+'	------------------------------------------
+'	arrProcessList.add("<host>:Exponent Connector Service")	' Adlib service
+'	arrProcessList.add("<host>:Exponent Manager Service")	' Adlib Service
+'	arrProcessList.add("<host>:Adlib FMR")			' Adlib fault monitoring service
+'	arrProcessList.add("<host>:Adlib Process Manager")	' Adlib Process Manager
+'	arrProcessList.add("<host>:CTSMonitor")			' CTS Monitor service
+'	arrProcessList.add("<host>:DocumentumCTS")		' CTS service
+'	arrProcessList.add("<host>:CtsAdminAgent")		' CTS agent
+'	arrProcessList.add("<host>:Spooler")			' MS print spooler
+'
+'	xPlore
+'	------------------------------------------
+'	arrProcessList.add("<host>:DmIndexagent")		' DCTM Index Agent
+'	arrProcessList.add("<host>:DmPrimaryDsearch")		' Primary DSearch instance
+'	arrProcessList.add("<host>:DmWatchdog-e-xPlore")	' xPlore watchdog
+'
+'	IDSx
+'	------------------------------------------
+'	arrProcessList.add("<host>:EMC IDSx Target_non_secure_2788")	' IDSx target
+'   	arrProcessList.add("<host>:EMC IDSx Target_secure_2787")	' IDSx target (secure)
+'   	arrProcessList.add("<host>:EMC IDSx DmWEBCACHE")		' IDSx host
+
+
+    '--------------------------------------------------------------------------
+    '- Init() - reads input variables from input controls and does some simple
+    '-          validation.  Loads the array of hosts and process names into
+    '-          the arrHostsWithProcesses structure.  Obtains the WbemLocator 
+    '-          object and then calls SetWorkingMsgAndProcess to start 
+    '-          collecting the process statuses.
+    '- Calls:   SetWorkingMsgAndProcess
+    '- Called From:  HTML Start button
+    '--------------------------------------------------------------------------
+	Sub Init()
+		
+	    ' collect input from web form
+		strUser = User.Value
+		strPassword = Password.Value
+	    iRefreshInterval = RefreshInterval.Value
+		bResult = True
+	    
+	    ' validate user and password entered
+		If (strUser = "" Or strPassword = "") Then
+			MsgBox("You must enter a username and password to continue.")
+			bResult = False
+		End If
+	
+	    ' validate that the refresh interval is valid.  It can be 0 (meaning
+	    ' no refresh, single run) or a value greater than 29.
+		If (iRefreshInterval <> 0 AND iRefreshInterval < 29) Then
+			MsgBox("The refresh interval must be at least 30 sec.")
+			bResult = False
+		End If
+
+		' load host and process structures
+		parseProcessArray()
+		
+		' get network locator obj
+		Set oWbemLocator = CreateObject("WbemScripting.SWbemLocator")
+		If (IsEmpty(oWbemLocator)) Then
+			MsgBox("Network Error: " & Err.Description & " (" & Err.Number & ").")
+			bResult = False
+		End If
+
+		' check username and password before proceeding 
+		hosts = arrHostsWithProcesses.Keys 
+		host = hosts(0) 
+		On Error Resume Next 
+		Set oWMIServiceTest = oWbemLocator.ConnectServer(host,"root\cimv2",strUser,strPassword)
+		
+		' connected?
+		If(IsEmpty(oWMIServiceTest)) Then
+  			MsgBox("Cannot authenticate with user name or password.")
+  			bResult = False
+		End If
+			
+		' if all checks have been passed, start the process
+		If (bResult = True) Then
+			' set working message and call sub
+   			SetWorkingMsgAndProcess
+   		Else
+   			Exit Sub
+   		End If		
+	
+	End Sub
+
+
+    '--------------------------------------------------------------------------
+    '- parseProcessArray() - loads the arrHostsWithProcesses structure with
+    '-          hosts and processes to monitor.  The arrHostsWithProcesses is a
+    '-          Dictionary with host names as keys.  The value of each key is
+    '-          an array list containing the process name. This structure is 
+    '-          designed like this:
+    '-             host
+    '-               +- process
+    '-               +- process
+    '-               +- process
+    '-             host
+    '-               +- process
+    '-               +- process
+    '-               +- process
+    '-
+    '- Calls:   None
+    '- Called From:  Init()
+    '--------------------------------------------------------------------------
+	Sub parseProcessArray()
+	
+		' create a new structure to hold host and process list
+		Set arrHostsWithProcesses = CreateObject("Scripting.Dictionary")
+	
+		For Each line In arrProcessList
+
+			' split each line into two parts by the ':' delimiter
+			temp = Split(line,":")
+			host = Trim(temp(0))
+			process = Trim(temp(1))
+		
+			' if host already in structure
+			If (arrHostsWithProcesses.Exists(host)) Then
+
+				' get the process Array List
+				Set arrProc	= arrHostsWithProcesses.Item(host)
+
+				' add process to Array List for this host
+				arrProc.Add process
+			Else
+
+				' if host not defined, create it and add process definition
+				' create an Array List and add it to the Dictionary
+				Set arrProc = CreateObject("System.Collections.ArrayList")
+				arrProc.Add process
+				arrHostsWithProcesses.Add host,arrProc
+			End If
+		Next
+	End Sub
+	
+	
+    '--------------------------------------------------------------------------
+    '- SetWorkingMsgAndProcess() - this sub simply puts 'Working' on the screen
+    '-          to indicate the process has started.  In order to make this 
+    '-          happen in HTA, it was necessary to set a timeout timer.  This
+    '-          timer times out in .1 sec and passes control to the 
+    '-          CheckProcesses() sub.
+    '- Calls:   CheckProcesses (indirectly)
+    '- Called From:  Init()
+    '--------------------------------------------------------------------------
+	Sub SetWorkingMsgAndProcess()
+		DataArea.InnerHTML = "<p class='blinktext'/>Working...<p/>"
+		document.body.style.cursor = "wait"
+   		iWorkingTimerID = window.setTimeout("CheckProcesses",100)
+   	End Sub
+
+   		
+    '--------------------------------------------------------------------------
+    '- CheckProcesses() - This is the control process of the monitor.  It
+    '-          first determines if the refresh timer is set or needs to be set
+    '-          and then loops through the arrHostsWithProcesses structure to
+    '-          obtain the status of each defined process.
+    '-          
+    '- Calls:   checkAProcess()
+    '- Called From:  SetWorkingMsgAndProcess()
+    '--------------------------------------------------------------------------	
+	Sub CheckProcesses()
+
+		' get the current time
+	    strLastRefresh = Now
+		
+		' start the output string with the refresh stamp
+		strHTML = "<p/>Last Refresh: " & strLastRefresh 
+		
+		' if a refresh timer should be set but isn't, set it
+		If (iRefreshInterval > 0) Then
+			If (iRefreshTimerID = -1) Then
+				iRefreshTimerID = window.setInterval("CheckProcesses",iRefreshInterval*1000)
+				Start.disabled = True
+			End If	
+			
+			' add the stop button to the output string if refresh is enabled
+			strHTML = strHTML & " <br/><input type='button' value='Stop Refresh' onclick='StopRefresh'>"
+
+			' add a refresh now button if refresh is enabled
+			strHTML = strHTML & " &nbsp;&nbsp; <input type='button' value='Refresh Now' onclick='init'>"
+			
+		End If
+		
+		strHTML = strHTML & "<p/>"
+
+		' loop over the arrHostsWithProcesses structure and get each process' status
+		arrKeys = arrHostsWithProcesses.Keys
+		For Each host In arrKeys
+
+			' print the host name
+			strHTML = strHTML & writeHostHeader(host)
+			Set arrProc = arrHostsWithProcesses.Item(host)
+			
+			' get status for each process running on host
+			For Each process In arrProc
+				If (process <> "") Then
+					' create the output string			
+					strHTML = strHTML & checkAProcess(host, strUser, strPassword, process)
+				End If
+			Next
+		Next
+
+		' when processing is done, reset cursor
+		document.body.style.cursor = "arrow"
+		
+		' replace the content of the DataArea with the the string built by processing 
+		' the arrHostsWithProcesses structure
+		DataArea.InnerHTML = "<table id='processes'>" & strHTML & "</table>"
+		
+	End Sub
+
+    
+    '--------------------------------------------------------------------------
+    '- writeHostHeader() - create the 3 column header for each host.
+    '- Calls:   None
+    '- Called From:  CheckProcesses()
+    '--------------------------------------------------------------------------
+	Function writeHostHeader(host)
+		writeHostHeader = "<tr><th colspan='3'>" & host & "</th></tr>"
+	End Function
+
+	
+    '--------------------------------------------------------------------------
+    '- checkAProcess() - this function is the workhorse of the application.  It
+    '           takes in the required arguments to query the a server about the
+    '           status of a process.  It uses the WbemLocator and WMIService
+    '           objects to achieve this.  It then continues to build the HTML 
+    '           output string based upon the process' status.
+    '- Calls:   None
+    '- Called From: CheckProcesses()
+    '--------------------------------------------------------------------------
+	Function checkAProcess(host, user, password, process)
+		
+		On Error Resume Next 
+
+		' set the default output string.  This will be overwritten by a successful
+		' query of the designated server and process
+		strHTML = "<tr><td>" & process & "</td>"
+				  
+		' connect via RDP
+		Set oWMIService = oWbemLocator.ConnectServer(host, "root\cimv2", user, password)
+
+		' connected?
+		If (Not IsEmpty(oWMIService)) Then 
+			oWMIService.Security_.AuthenticationLevel = 6
+			
+			' get process we are looking for
+			Set colRunningServices = oWMIService.ExecQuery("Select * from Win32_Service where Name='" & process & "'")
+
+			If (colRunningServices.Count > 0) Then
+
+				For Each oService in colRunningServices
+				  
+				  ' overwrite default output
+				  strHTML = "<tr><td>" & oService.DisplayName & "<br/>(" & process & ")</td>"
+				  
+				  If (Not IsEmpty(oService)) Then 
+
+					  If (oService.Started) Then
+
+						' if running, shade green and put stop button
+					    strHTML = strHTML & "<td class='running'>Running</td>" 
+					    strHTML = strHTML & "<td><input type='button' value='Stop Service' onclick=""Call StopService('" & host & "','" & user & "','" & password & "','" & process & "')""></tr>"
+					  Else 
+					  
+					    ' if not running, shade red and put start button
+					    strHTML = strHTML & "<td class='stopped'>NOT Running</td>"
+					    strHTML = strHTML & "<td><input type='button' value='Start Service' onclick=""Call StartService('" & host & "','" & user & "','" & password & "','" & process & "')""></tr>"
+					  End If
+					Else
+						strHTML = strHTML & "<td class='error' colspan='2'>Could not get service: " & Err.Description & "(" & Err.Number & ")</td></tr>"
+					End If     
+				Next
+			Else
+				strHTML = strHTML & "<td class='error' colspan='2'>Could not get collection of services: " & Err.Description & "(" & Err.Number & ")</td></tr>"
+			End If
+		Else
+			' an error occured connecting to server
+			strHTML = strHTML & "<td class='error' colspan='2'>Connection error: " & Err.Description & "(" & Err.Number & ")</td></tr>"
+		End If
+
+    ' return the string we built
+	checkAProcess = strHTML
+	
+	Set oWMIService = Nothing
+	
+	End Function
+	
+
+    '--------------------------------------------------------------------------
+    '- StopRefresh() - cancels the refresh timer and clears all user input 
+    '           fields.
+    '- Calls:  StopRefreshTimer()
+    '- Called From: - HTML Stop button
+    '--------------------------------------------------------------------------	
+	Sub StopRefresh()
+		StopRefreshTimer
+		User.Value = ""
+		Password.Value = ""
+	    RefreshInterval.Value = "0"
+		Start.disabled = False
+	End Sub
+	
+	
+    '--------------------------------------------------------------------------
+    '- StopRefreshTimer() - stops and clears the refresh timer.
+    '- Calls:   None
+    '- Called From: StopRefresh()
+    '--------------------------------------------------------------------------		
+	Sub StopRefreshTimer()
+		If (iRefreshTimerID <> -1) Then
+			window.clearInterval(iRefreshTimerID)
+			iRefreshTimerID = -1
+		End If	
+	End Sub
+	
+		
+    '--------------------------------------------------------------------------
+    '- StartService() - tries to start the specified process.  
+    '- Calls:   StartStopService
+    '- Called From: HTML Start Service button
+    '--------------------------------------------------------------------------		
+    Sub StartService(host, user, password, process)
+    	StartStopService host, user, password, process, True
+    End Sub	
+   
+   
+    '--------------------------------------------------------------------------
+    '- StopService() - tries to stop the specified process.  
+    '- Calls:   StartStopService
+    '- Called From: HTML Stop Service button
+    '--------------------------------------------------------------------------	
+    Sub StopService(host, user, password, process)
+    	StartStopService host, user, password, process, False
+    End Sub
+    
+    
+    '--------------------------------------------------------------------------
+    '- StartStopService() - tries to stop/start the specified process.  Resets 
+    '           the refresh timer and calls the main process loop by calling 
+    '           SetWorkingMsgAndProcess().
+    '- Calls:   StopRefreshTimer(), SetWorkingMsgAndProcess()
+    '- Called From: StartService(), StopService()
+    '--------------------------------------------------------------------------	    
+    Sub StartStopService(host, user, password, process, start)
+	
+		' connect via RDP
+		Set oWMIService = oWbemLocator.ConnectServer(host, "root\cimv2", user, password)
+
+		If (Not oWMIService Is Nothing) Then 
+			oWMIService.Security_.AuthenticationLevel = 6
+				
+			' get process
+			Set colRunningServices = oWMIService.ExecQuery("Select * from Win32_Service where Name='" & process & "'")
+			For Each oService in colRunningServices
+
+				' start service
+				If (start = True) Then
+					oService.StartService
+				Else	
+					' stop service
+  	  				oService.StopService
+  	  			End If	
+  	  			
+  	  			' restart monitor processes
+  	  			StopRefreshTimer
+  	  			SetWorkingMsgAndProcess
+				  	  		
+		  	Next
+		Else
+			' an error occured connecting to server
+			MsgBox ("Connect error while stopping/starting " & process & " : " & Err.Description & "(" & Err.Number & ")")
+		End If		  	  
+		
+		Set oWMIService = Nothing
+		  	  
+   End Sub	
+  
+</script>
+
+<!-- START HTML -->
+
+<body bgcolor="white">
+
+<p/>
+<!-- change the title as you wish -->
+<h1 align="center">ProcessMonitor</h1>
+
+<!-- input controls -->
+<label for="User">User Name: </label>
+<input type="text" name="User" id="User">
+<label for="Password">Password: </label>
+<input type="password" name="Password" id="Password">
+<label for="RefreshInterval">Refresh Interval: </label>
+<input type="text" size="5" name="RefreshInterval" id="RefreshInterval" value="0">
+&nbsp;
+<input type="button" name="Start" id="Start" value="  Start  " onclick="Init"><br/>
+<hr/>
+
+<!-- two column table.  left is DataArea, right is static text -->
+<table>
+<tr>
+<td width="50%" valign='top'><span id="DataArea">Disconnected.</span></td>
+
+<td valign='top'><p/><span id="TextArea">
+<h3><center>Instructions</center></h3>
+<ul>
+<li>Enter a username and password, then click the 'Start' button to check the status of 
+defined processes.
+
+<li>Enter a refresh value greater than 30 sec to loop the process.  A refresh value of 0 
+will run the process only once.
+
+<li>Processes marked as 'Running' have an accompanying 'Stop Service' button that will 
+attempt to stop the service when clicked.  Processes that are not running are denoted
+as 'NOT Running' and can be started by clicking the corrresponding 'Start Service' button.
+
+<hr/>
+<!-- handy links -->
+<h3><center>Handy Links</center></h3>
+<ul>
+
+<!-- Update/change these links as appropriate-->
+
+<li><a href="http://127.0.0.1:8080/da" target="_blank">Documentum Administrator</a></li>
+<li><a href="http://127.0.0.1/Login.aspx" target="_blank">InputAccel Admin Console</a></li>
+<li><a href="http://msroth.wordpress.com" target="_blank">dm_misc blog</a></li>
+</ul>
+</span>
+</td>
+</tr>
+</table>
+
+<!-- footer -->
+
+<hr/>
+<i>ProcessMonitor HTA v1.6 (c) 2012 - 2015 MS Roth -- msroth.wordpress.com</i>
+</body>
+</html>
+
+<!-- <SDG>< -->
